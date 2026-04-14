@@ -39,6 +39,7 @@ func LoadEnv(filePath string) (map[string]string, error) {
 		}
 
 		valuePart := strings.TrimSpace(line[eqIdx+1:])
+		// 统一处理未加引号值、双引号值与行尾注释。
 		value, err := parseValue(valuePart, lineNo)
 		if err != nil {
 			return nil, err
@@ -53,6 +54,7 @@ func LoadEnv(filePath string) (map[string]string, error) {
 	return result, nil
 }
 
+// parseValue 解析 .env 的值字段，支持裸值、双引号值和注释尾随内容。
 func parseValue(valuePart string, lineNo int) (string, error) {
 	trimmed := strings.TrimSpace(valuePart)
 	if trimmed == "" {
@@ -77,6 +79,7 @@ func parseValue(valuePart string, lineNo int) (string, error) {
 	return "", fmt.Errorf("invalid .env line %d: unexpected trailing content after quoted value", lineNo)
 }
 
+// decodeDoubleQuoted 解码双引号包裹的值并返回结束引号索引。
 func decodeDoubleQuoted(value string) (string, int, error) {
 	var b strings.Builder
 	for i := 1; i < len(value); i++ {
@@ -115,6 +118,7 @@ func decodeDoubleQuoted(value string) (string, int, error) {
 	return "", 0, fmt.Errorf("missing closing quote")
 }
 
+// trimInlineComment 移除裸值中的行内注释，仅当 # 前面是空白符时才视为注释。
 func trimInlineComment(value string) string {
 	idx := strings.Index(value, "#")
 	if idx == -1 {
@@ -132,6 +136,7 @@ func trimInlineComment(value string) string {
 	return value
 }
 
+// isSpace 判断字符是否为空格或制表符。
 func isSpace(r rune) bool {
 	return r == ' ' || r == '\t'
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// writeTempEnvFile 在临时目录创建 .env 文件并返回其路径。
 func writeTempEnvFile(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -16,6 +17,7 @@ func writeTempEnvFile(t *testing.T, content string) string {
 	return path
 }
 
+// TestLoadEnv_BasicAndDuplicateKey 验证基础解析以及重复键覆盖行为。
 func TestLoadEnv_BasicAndDuplicateKey(t *testing.T) {
 	path := writeTempEnvFile(t, "A=1\nB=2\nA=3\n")
 
@@ -32,6 +34,7 @@ func TestLoadEnv_BasicAndDuplicateKey(t *testing.T) {
 	}
 }
 
+// TestLoadEnv_IgnoreBlankAndComments 验证空行与注释行会被忽略。
 func TestLoadEnv_IgnoreBlankAndComments(t *testing.T) {
 	path := writeTempEnvFile(t, "\n# comment\nX=ok\n\n# another\n")
 
@@ -45,6 +48,7 @@ func TestLoadEnv_IgnoreBlankAndComments(t *testing.T) {
 	}
 }
 
+// TestLoadEnv_InlineComment 验证裸值行内注释与 # 字符边界规则。
 func TestLoadEnv_InlineComment(t *testing.T) {
 	path := writeTempEnvFile(t, "A=hello # comment\nB=a#b\nC=# only comment\n")
 
@@ -64,6 +68,7 @@ func TestLoadEnv_InlineComment(t *testing.T) {
 	}
 }
 
+// TestLoadEnv_DoubleQuotedValues 验证双引号值及转义序列解码。
 func TestLoadEnv_DoubleQuotedValues(t *testing.T) {
 	path := writeTempEnvFile(t, "A=\"hello\"\nB=\"a#b\"\nC=\"line1\\nline2\"\nD=\"x\\\"y\\\\z\"\nE=\"ok\"   # trailing comment\n")
 
@@ -89,6 +94,7 @@ func TestLoadEnv_DoubleQuotedValues(t *testing.T) {
 	}
 }
 
+// TestLoadEnv_InvalidLine 验证非法行格式会返回错误。
 func TestLoadEnv_InvalidLine(t *testing.T) {
 	path := writeTempEnvFile(t, "A=1\nINVALID\n")
 
@@ -98,6 +104,7 @@ func TestLoadEnv_InvalidLine(t *testing.T) {
 	}
 }
 
+// TestLoadEnv_InvalidQuotedValue 验证非法双引号值会返回错误。
 func TestLoadEnv_InvalidQuotedValue(t *testing.T) {
 	tests := []string{
 		"A=\"abc\n",
@@ -114,6 +121,7 @@ func TestLoadEnv_InvalidQuotedValue(t *testing.T) {
 	}
 }
 
+// TestLoadEnv_MissingFile 验证缺失文件时返回错误。
 func TestLoadEnv_MissingFile(t *testing.T) {
 	_, err := LoadEnv("not-exists-file.env")
 	if err == nil {
