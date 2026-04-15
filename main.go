@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
-	"strconv"
 	"strings"
+	"time"
 
+	"github.com/abyssferry/zhitong-ai-agent/langchain"
 	"github.com/abyssferry/zhitong-ai-agent/utils"
 )
 
@@ -18,45 +21,69 @@ func main() {
 		log.Fatal(err)
 	}
 
-	cfg := Config{
-		Model:                     getRequiredValue(envMap, "MODEL"),
-		APIKey:                    getRequiredValue(envMap, "API_KEY"),
-		BaseURL:                   getRequiredValue(envMap, "BASE_URL"),
-		MaxReactRounds:            getOptionalPositiveIntValue(envMap, "MAX_REACT_ROUNDS"),
-		Prompts:                   DefaultPromptConfig(),
-		ContextTrimTokenThreshold: getOptionalPositiveIntValue(envMap, "CONTEXT_TRIM_TOKEN_THRESHOLD"),
-		ContextKeepRecentRounds:   getOptionalPositiveIntValue(envMap, "CONTEXT_KEEP_RECENT_ROUNDS"),
-	}
+	customSystemPrompt := "你是我的小助手"
+	temperature := 0.3
+	// requestTimeout 控制单轮模型请求的超时时间。
+	requestTimeout := 90 * time.Second
 
-	// 设置默认值：若环境变量未设置则使用硬编码默认值
-	if cfg.ContextTrimTokenThreshold == 0 {
-		cfg.ContextTrimTokenThreshold = 16000
-	}
-	if cfg.ContextKeepRecentRounds == 0 {
-		cfg.ContextKeepRecentRounds = 6
-	}
+	// maxReactRounds 控制单次 ReAct 推理允许的最大轮数。
+	maxReactRounds := 20
+	// contextTrimTokenThreshold 控制触发历史裁剪与摘要的 token 阈值。
+	contextTrimTokenThreshold := 500
+	// contextKeepRecentRounds 控制裁剪后保留的最近轮次数量。
+	contextKeepRecentRounds := 2
 
-	client, err := NewOpenAICompatibleClient(cfg)
+	model := utils.GetEnv(envMap, "MODEL", "")
+	apiKey := utils.GetEnv(envMap, "API_KEY", "")
+	baseURL := utils.GetEnv(envMap, "BASE_URL", "")
+	debugMessages := utils.GetEnv(envMap, "DEBUG_MESSAGES", "") == "true"
+
+	chatModel, err := langchain.InitChatModel(langchain.ChatModelOptions{
+		Model:                     model,
+		SystemPrompt:              customSystemPrompt,
+		APIKey:                    apiKey,
+		BaseURL:                   baseURL,
+		ContextTrimTokenThreshold: contextTrimTokenThreshold,
+		ContextKeepRecentRounds:   contextKeepRecentRounds,
+		Temperature:               &temperature,
+		RequestTimeout:            &requestTimeout,
+		DebugMessages:             debugMessages,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	chatHistory := []Message{{Role: "system", Content: cfg.Prompts.SystemPrompt}}
-	streamHistory := []Message{{Role: "system", Content: cfg.Prompts.SystemPrompt}}
-	reactHistory := []Message{{
-		Role:    "system",
-		Content: cfg.Prompts.ReactSystemPrompt,
-	}}
+	registry := langchain.NewToolRegistry()
+	if err := registry.RegisterFromHandler("get_current_time", "当你想知道现在时间时非常有用。", getCurrentTime); err != nil {
+		log.Fatal(err)
+	}
+	if err := registry.RegisterFromHandler("get_current_weather", "当你想查询指定城市天气时非常有用。", getCurrentWeather); err != nil {
+		log.Fatal(err)
+	}
 
-	// 为每个模式初始化对话轮次运行时统计
-	chatStats := TurnRuntimeStats{}
-	streamStats := TurnRuntimeStats{}
-	reactStats := TurnRuntimeStats{}
+	agent, err := langchain.CreateAgent(langchain.AgentOptions{
+		Model:                     model,
+		SystemPrompt:              customSystemPrompt,
+		APIKey:                    apiKey,
+		BaseURL:                   baseURL,
+		MaxReactRounds:            maxReactRounds,
+		Tools:                     registry,
+		ContextTrimTokenThreshold: contextTrimTokenThreshold,
+		ContextKeepRecentRounds:   contextKeepRecentRounds,
+		Temperature:               &temperature,
+		RequestTimeout:            &requestTimeout,
+		DebugMessages:             debugMessages,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	mode := "chat"
 	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Println("OpenAI-Compatible CLI 已启动")
+	fmt.Println("LangChain 风格 Go CLI 已启动")
+	fmt.Printf("示例: 本程序会在初始化时注入用户自定义系统提示词: %s\n", customSystemPrompt)
+	fmt.Printf("示例: 温度=%.1f\n", temperature)
 	fmt.Println("命令: /mode chat | /mode stream | /mode react | /clear | /help | /exit")
 
 	for {
@@ -80,68 +107,134 @@ func main() {
 			}
 			mode = nextMode
 			if cleared {
-				chatHistory = []Message{{Role: "system", Content: cfg.Prompts.SystemPrompt}}
-				streamHistory = []Message{{Role: "system", Content: cfg.Prompts.SystemPrompt}}
-				reactHistory = []Message{{
-					Role:    "system",
-					Content: cfg.Prompts.ReactSystemPrompt,
-				}}
-				chatStats = TurnRuntimeStats{}
-				streamStats = TurnRuntimeStats{}
-				reactStats = TurnRuntimeStats{}
+				chatModel.Reset()
+				agent.Reset()
 				fmt.Println("上下文已清空")
 			}
 			continue
 		}
 
+		messages := []langchain.Message{
+			{Role: "user", Content: input},
+		}
+
 		switch mode {
 		case "chat":
-			assistant, err := runChatTurn(client, cfg, &chatHistory, &chatStats, input)
+			result, err := chatModel.Invoke(langchain.InvokeInput{Messages: messages})
 			if err != nil {
 				fmt.Printf("错误: %v\n", err)
 				continue
 			}
-			fmt.Printf("助手: %s\n", assistant)
+			fmt.Printf("助手: %s\n", result.Content)
 		case "stream":
-			assistant, err := runStreamTurn(client, cfg, &streamHistory, &streamStats, input)
+			fmt.Print("助手(流式): ")
+			result, err := chatModel.Stream(langchain.InvokeInput{Messages: messages})
 			if err != nil {
 				fmt.Printf("错误: %v\n", err)
 				continue
 			}
-			fmt.Printf("\n助手(完整): %s\n", assistant)
+			var contentBuilder strings.Builder
+			for event := range result.Events {
+				if event.Type == "content" && event.Content != "" {
+					fmt.Print(event.Content)
+					contentBuilder.WriteString(event.Content)
+				}
+			}
+			summary, waitErr := result.Wait()
+			if waitErr != nil {
+				fmt.Printf("错误: %v\n", waitErr)
+				continue
+			}
+			if summary.Content != "" && summary.Content != contentBuilder.String() {
+				contentBuilder.Reset()
+				contentBuilder.WriteString(summary.Content)
+			}
+			fmt.Printf("\n助手(完整): %s\n", contentBuilder.String())
 		case "react":
-			_, err := runReactTurn(client, cfg, &reactHistory, &reactStats, input)
+			fmt.Print("助手(流式): ")
+			result, err := agent.Stream(langchain.InvokeInput{Messages: messages})
 			if err != nil {
 				fmt.Printf("错误: %v\n", err)
 				continue
 			}
+			var contentBuilder strings.Builder
+			for event := range result.Events {
+				switch event.Type {
+				case "content":
+					fmt.Print(event.Content)
+					contentBuilder.WriteString(event.Content)
+				case "tool_start":
+					fmt.Printf("\n[工具] 开始 %s 参数=%s\n", event.ToolName, event.RawArguments)
+				case "tool_end":
+					fmt.Printf("[工具] 完成 %s 参数=%s 输出=%s\n", event.ToolName, event.RawArguments, event.Content)
+				case "error":
+					fmt.Printf("\n[流式错误] %s\n", event.Content)
+				}
+			}
+			summary, waitErr := result.Wait()
+			if waitErr != nil {
+				fmt.Printf("错误: %v\n", waitErr)
+				continue
+			}
+			if summary.Content != "" && summary.Content != contentBuilder.String() {
+				contentBuilder.Reset()
+				contentBuilder.WriteString(summary.Content)
+			}
+			fmt.Printf("\n助手(完整): %s\n", contentBuilder.String())
 		default:
 			fmt.Printf("未知模式: %s\n", mode)
 		}
 	}
 }
 
-// getRequiredValue 返回必填配置项；当键不存在或为空时终止程序。
-func getRequiredValue(envMap map[string]string, key string) string {
-	value := strings.TrimSpace(envMap[key])
-	if value == "" {
-		log.Fatalf("missing required key in .env: %s", key)
-	}
-	return value
+// getCurrentTimeArgs 是获取时间工具入参。
+type getCurrentTimeArgs struct{}
+
+// getCurrentTime 返回当前本地时间。
+func getCurrentTime(_ getCurrentTimeArgs) (string, error) {
+	time.Sleep(1 * time.Second)
+	return fmt.Sprintf("当前时间：%s。", time.Now().Format("2006-01-02 15:04:05")), nil
 }
 
-// getOptionalPositiveIntValue 返回可选正整数配置；空值返回 0，非法值会终止程序。
-func getOptionalPositiveIntValue(envMap map[string]string, key string) int {
-	raw := strings.TrimSpace(envMap[key])
-	if raw == "" {
-		return 0
+// getCurrentWeatherArgs 是天气工具入参。
+type getCurrentWeatherArgs struct {
+	// Location 是查询天气的城市或区县。
+	Location string `json:"location" tool:"desc=城市或县区，比如北京市、杭州市、余杭区等。;required"`
+	// Unit 是温度单位，支持 c 或 f。
+	Unit string `json:"unit,omitempty" tool:"desc=温度单位，c表示摄氏度，f表示华氏度。;default=c;enum=c|f"`
+	// Days 是天气预报天数。
+	Days int `json:"days,omitempty" tool:"desc=天气预报天数，范围1-7。;default=1"`
+}
+
+// getCurrentWeather 根据位置返回模拟天气。
+func getCurrentWeather(arguments getCurrentWeatherArgs) (string, error) {
+	time.Sleep(2 * time.Second)
+	location := strings.TrimSpace(arguments.Location)
+	if location == "" {
+		return "", errors.New("missing argument: location")
+	}
+	unit := strings.ToLower(strings.TrimSpace(arguments.Unit))
+	if unit == "" {
+		unit = "c"
+	}
+	if unit != "c" && unit != "f" {
+		return "", errors.New("invalid argument: unit must be c or f")
+	}
+	days := arguments.Days
+	if days <= 0 {
+		days = 1
+	}
+	if days > 7 {
+		return "", errors.New("invalid argument: days must be between 1 and 7")
 	}
 
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		log.Fatalf("invalid optional key in .env: %s must be a positive integer, got %q", key, raw)
+	weather := []string{"晴天", "多云", "雨天"}
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	temp := r.Intn(16) + 18
+	if unit == "f" {
+		temp = temp*9/5 + 32
 	}
-	return value
+	return fmt.Sprintf("%s未来%d天首日是%s，温度约%d°%s。", location, days, weather[r.Intn(len(weather))], temp, strings.ToUpper(unit)), nil
 }
 
 // handleCommand 解析并执行 CLI 命令，返回下一模式、是否退出和是否清空上下文。
@@ -175,71 +268,4 @@ func handleCommand(input string, mode string) (nextMode string, shouldExit bool,
 		fmt.Println("未知命令，可输入 /help 查看帮助")
 		return mode, false, false
 	}
-}
-
-// runChatTurn 执行一次普通对话轮次，支持上下文自动裁剪和错误重试。
-func runChatTurn(client ChatProvider, cfg Config, history *[]Message, stats *TurnRuntimeStats, userInput string) (string, error) {
-	// 检查是否需要基于 usage 进行裁剪
-	if shouldTrimByUsage(*stats, cfg) {
-		if err := TrimAndSummarizeHistoryContext(client, cfg, history, stats, "usage"); err != nil {
-			fmt.Printf("警告: 上下文裁剪失败: %v\n", err)
-		}
-	}
-
-	*history = append(*history, Message{Role: "user", Content: userInput})
-
-	// 使用 RetryWithTrim 处理请求和错误触发的重试
-	respInterface, _, err := RetryWithTrim(client, cfg, history, stats, func() (interface{}, Usage, error) {
-		resp, respErr := client.Chat(ChatRequest{Messages: *history})
-		if respErr != nil {
-			return nil, Usage{}, respErr
-		}
-		return resp, resp.Usage, nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	resp := respInterface.(*chatAPIResponse)
-	assistant := extractAssistantText(resp)
-	*history = append(*history, Message{Role: "assistant", Content: assistant})
-	return assistant, nil
-}
-
-// runStreamTurn 执行一次流式对话轮次，支持上下文自动裁剪和错误重试。
-func runStreamTurn(client ChatProvider, cfg Config, history *[]Message, stats *TurnRuntimeStats, userInput string) (string, error) {
-	// 检查是否需要基于 usage 进行裁剪
-	if shouldTrimByUsage(*stats, cfg) {
-		if err := TrimAndSummarizeHistoryContext(client, cfg, history, stats, "usage"); err != nil {
-			fmt.Printf("警告: 上下文裁剪失败: %v\n", err)
-		}
-	}
-
-	*history = append(*history, Message{Role: "user", Content: userInput})
-	fmt.Print("助手(流式): ")
-
-	// 使用 RetryWithTrim 处理请求和错误触发的重试
-	respInterface, usage, err := RetryWithTrim(client, cfg, history, stats, func() (interface{}, Usage, error) {
-		result, respErr := client.ChatStream(ChatRequest{Messages: *history}, func(chunk StreamChunk) {
-			if chunk.Content != "" {
-				fmt.Print(chunk.Content)
-			}
-		})
-		if respErr != nil {
-			return nil, Usage{}, respErr
-		}
-		return result, result.Usage, nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	result := respInterface.(StreamResult)
-	if usage.TotalTokens > 0 {
-		fmt.Printf("\n用量: prompt=%d completion=%d total=%d", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
-	}
-	*history = append(*history, Message{Role: "assistant", Content: result.Content})
-	return result.Content, nil
 }

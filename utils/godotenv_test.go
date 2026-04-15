@@ -128,3 +128,23 @@ func TestLoadEnv_MissingFile(t *testing.T) {
 		t.Fatal("expected error for missing file, got nil")
 	}
 }
+
+// TestGetEnv_DefaultBehavior 验证 GetEnv 与 Python os.getenv 一致的默认值行为。
+func TestGetEnv_DefaultBehavior(t *testing.T) {
+	envMap := map[string]string{
+		"MODEL": "gpt-4.1",
+		"EMPTY": "",
+	}
+
+	if got := GetEnv(envMap, "MODEL", "fallback-model"); got != "gpt-4.1" {
+		t.Fatalf("expected existing key value, got %q", got)
+	}
+
+	if got := GetEnv(envMap, "MISSING", "fallback"); got != "fallback" {
+		t.Fatalf("expected default for missing key, got %q", got)
+	}
+
+	if got := GetEnv(envMap, "EMPTY", "fallback-empty"); got != "" {
+		t.Fatalf("expected empty string for existing empty key, got %q", got)
+	}
+}

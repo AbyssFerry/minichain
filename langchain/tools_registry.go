@@ -1,4 +1,4 @@
-package main
+package langchain
 
 import (
 	"encoding/json"
@@ -6,27 +6,43 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
-// toolCatalog 统一保存工具定义与本地执行映射，避免手写两份数据结构。
-type toolCatalog struct {
-	// tools 是发送给模型的工具定义列表。
-	tools []ToolDefinition
-	// mapper 是工具名到本地执行函数的映射表。
-	mapper map[string]ToolFunc
+// ToolFunc 定义工具执行函数签名。
+type ToolFunc func(arguments map[string]any) (string, error)
+
+// ToolSpec 定义显式工具描述与执行器。
+type ToolSpec struct {
+	// Name 是工具名称。
+	Name string
+	// Description 是工具描述。
+	Description string
+	// Parameters 是 JSON Schema 风格参数定义。
+	Parameters map[string]any
+	// Executor 是工具执行函数。
+	Executor ToolFunc
 }
 
-// ToolRegistry 负责根据 Go 函数自动生成工具定义，并包装成可执行的本地函数。
+// StructuredTool 定义结构体工具注册接口。
+type StructuredTool interface {
+	// Name 返回工具名称。
+	Name() string
+	// Description 返回工具描述。
+	Description() string
+	// Handler 返回工具处理函数。
+	Handler() any
+}
+
+// ToolRegistry 负责统一注册工具定义和执行器。
 type ToolRegistry struct {
 	tools  []ToolDefinition
 	mapper map[string]ToolFunc
 	seen   map[string]struct{}
 }
 
-// newToolRegistry 创建一个空的工具注册器。
-func newToolRegistry() *ToolRegistry {
+// NewToolRegistry 创建空工具注册器。
+func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
 		tools:  make([]ToolDefinition, 0),
 		mapper: make(map[string]ToolFunc),
@@ -34,13 +50,7 @@ func newToolRegistry() *ToolRegistry {
 	}
 }
 
-// RegisterFromHandler 根据函数签名注册一个工具，并自动生成 JSON Schema 风格参数定义。
-//
-// handler 必须是以下形态之一：
-// - func() (string, error)
-// - func(T) (string, error)
-// - func(*T) (string, error)
-// 其中 T 建议为带 json tag 的 struct，便于自动生成可读的参数 schema。
+// RegisterFromHandler 根据函数签名注册工具并自动生成参数 schema。
 func (r *ToolRegistry) RegisterFromHandler(name, description string, handler any) error {
 	if r == nil {
 		return fmt.Errorf("tool registry is nil")
@@ -70,13 +80,16 @@ func (r *ToolRegistry) RegisterFromHandler(name, description string, handler any
 	if !handlerType.Out(1).Implements(reflect.TypeFor[error]()) {
 		return fmt.Errorf("tool handler for %s must return error as second value", name)
 	}
-	if handlerType.NumIn() > 1 {
-		return fmt.Errorf("tool handler for %s must accept zero or one argument", name)
+	if handlerType.NumIn() != 1 {
+		return fmt.Errorf("tool handler for %s must accept exactly one struct argument", name)
 	}
 
-	inputType := reflect.TypeFor[struct{}]()
-	if handlerType.NumIn() == 1 {
-		inputType = handlerType.In(0)
+	inputType := handlerType.In(0)
+	for inputType.Kind() == reflect.Pointer {
+		inputType = inputType.Elem()
+	}
+	if inputType.Kind() != reflect.Struct {
+		return fmt.Errorf("tool handler for %s argument must be a struct", name)
 	}
 
 	parameters, err := buildToolParameters(inputType)
@@ -102,7 +115,52 @@ func (r *ToolRegistry) RegisterFromHandler(name, description string, handler any
 	return nil
 }
 
-// Definitions 返回注册器中的工具定义副本。
+// RegisterSpec 通过显式 ToolSpec 注册工具。
+func (r *ToolRegistry) RegisterSpec(spec ToolSpec) error {
+	if r == nil {
+		return fmt.Errorf("tool registry is nil")
+	}
+	name := strings.TrimSpace(spec.Name)
+	if name == "" {
+		return fmt.Errorf("tool name cannot be empty")
+	}
+	if spec.Executor == nil {
+		return fmt.Errorf("tool executor cannot be nil")
+	}
+	if _, exists := r.seen[name]; exists {
+		return fmt.Errorf("duplicate tool name: %s", name)
+	}
+
+	params := spec.Parameters
+	if params == nil {
+		params = map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		}
+	}
+
+	r.tools = append(r.tools, ToolDefinition{
+		Type: "function",
+		Function: ToolFunction{
+			Name:        name,
+			Description: spec.Description,
+			Parameters:  params,
+		},
+	})
+	r.mapper[name] = spec.Executor
+	r.seen[name] = struct{}{}
+	return nil
+}
+
+// RegisterStructuredTool 通过结构体工具描述自动注册。
+func (r *ToolRegistry) RegisterStructuredTool(tool StructuredTool) error {
+	if tool == nil {
+		return fmt.Errorf("structured tool is nil")
+	}
+	return r.RegisterFromHandler(tool.Name(), tool.Description(), tool.Handler())
+}
+
+// Definitions 返回工具定义副本。
 func (r *ToolRegistry) Definitions() []ToolDefinition {
 	if r == nil {
 		return nil
@@ -112,7 +170,7 @@ func (r *ToolRegistry) Definitions() []ToolDefinition {
 	return result
 }
 
-// Mapper 返回注册器中的工具执行映射副本。
+// Mapper 返回工具执行映射副本。
 func (r *ToolRegistry) Mapper() map[string]ToolFunc {
 	if r == nil {
 		return nil
@@ -124,70 +182,13 @@ func (r *ToolRegistry) Mapper() map[string]ToolFunc {
 	return result
 }
 
-// defaultToolCatalogOnce 用于缓存默认工具目录，避免每次调用重复反射构建。
-var defaultToolCatalogOnce sync.Once
-
-// defaultToolCatalogValue 保存默认工具目录的构建结果。
-var defaultToolCatalogValue toolCatalog
-
-// defaultToolCatalogErr 保存默认工具目录构建过程中的错误。
-var defaultToolCatalogErr error
-
-// defaultToolCatalog 构建默认工具目录。
-func defaultToolCatalog() (toolCatalog, error) {
-	defaultToolCatalogOnce.Do(func() {
-		registry := newToolRegistry()
-		if err := registry.RegisterFromHandler(
-			"get_current_time",
-			"当你想知道现在时间时非常有用。",
-			getCurrentTime,
-		); err != nil {
-			defaultToolCatalogErr = err
-			return
-		}
-		if err := registry.RegisterFromHandler(
-			"get_current_weather",
-			"当你想查询指定城市天气时非常有用。",
-			getCurrentWeather,
-		); err != nil {
-			defaultToolCatalogErr = err
-			return
-		}
-
-		defaultToolCatalogValue = toolCatalog{
-			tools:  registry.Definitions(),
-			mapper: registry.Mapper(),
-		}
-	})
-	return defaultToolCatalogValue, defaultToolCatalogErr
-}
-
-// defaultTools 返回默认注册给模型的函数工具定义。
-func defaultTools() []ToolDefinition {
-	catalog, err := defaultToolCatalog()
-	if err != nil {
-		panic(err)
-	}
-	return cloneToolDefinitions(catalog.tools)
-}
-
-// defaultToolMapper 返回工具名到本地处理函数的映射表。
-func defaultToolMapper() map[string]ToolFunc {
-	catalog, err := defaultToolCatalog()
-	if err != nil {
-		panic(err)
-	}
-	return cloneToolMapper(catalog.mapper)
-}
-
-// buildToolExecutor 将一个带强类型参数的函数包装成运行时可执行的 ToolFunc。
+// buildToolExecutor 构建统一 ToolFunc 执行器。
 func buildToolExecutor(handlerValue reflect.Value, handlerType reflect.Type) (ToolFunc, error) {
 	return func(arguments map[string]any) (string, error) {
 		callArgs, err := buildCallArguments(handlerType, arguments)
 		if err != nil {
 			return "", err
 		}
-
 		results := handlerValue.Call(callArgs)
 		output := results[0].Interface().(string)
 		if err, ok := results[1].Interface().(error); ok && err != nil {
@@ -197,12 +198,11 @@ func buildToolExecutor(handlerValue reflect.Value, handlerType reflect.Type) (To
 	}, nil
 }
 
-// buildCallArguments 根据目标函数签名，将 map 参数转换成可调用参数列表。
+// buildCallArguments 根据处理函数签名转换调用参数。
 func buildCallArguments(handlerType reflect.Type, arguments map[string]any) ([]reflect.Value, error) {
 	if handlerType.NumIn() == 0 {
 		return nil, nil
 	}
-
 	if handlerType.NumIn() != 1 {
 		return nil, fmt.Errorf("unsupported handler signature")
 	}
@@ -215,7 +215,7 @@ func buildCallArguments(handlerType reflect.Type, arguments map[string]any) ([]r
 	return []reflect.Value{inputValue}, nil
 }
 
-// decodeToolInput 将通用参数对象解码成 handler 所需的具体输入值。
+// decodeToolInput 把 map 参数解码为目标处理函数参数。
 func decodeToolInput(inputType reflect.Type, arguments map[string]any) (reflect.Value, error) {
 	if inputType.Kind() == reflect.Pointer {
 		value, err := decodeToolInput(inputType.Elem(), arguments)
@@ -252,17 +252,14 @@ func decodeToolInput(inputType reflect.Type, arguments map[string]any) (reflect.
 	return inputValue.Elem(), nil
 }
 
-// buildToolParameters 根据参数类型构建 JSON Schema 风格参数定义。
+// buildToolParameters 根据参数类型构建 JSON Schema。
 func buildToolParameters(inputType reflect.Type) (map[string]any, error) {
 	if inputType.Kind() == reflect.Pointer {
 		return buildToolParameters(inputType.Elem())
 	}
 
 	if inputType == reflect.TypeOf(time.Time{}) {
-		return map[string]any{
-			"type":   "string",
-			"format": "date-time",
-		}, nil
+		return map[string]any{"type": "string", "format": "date-time"}, nil
 	}
 
 	if inputType.Kind() == reflect.Struct {
@@ -274,17 +271,11 @@ func buildToolParameters(inputType reflect.Type) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": valueSchema,
-		}, nil
+		return map[string]any{"type": "object", "additionalProperties": valueSchema}, nil
 	}
 
 	if inputType.Kind() == reflect.Interface && inputType.NumMethod() == 0 {
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": true,
-		}, nil
+		return map[string]any{"type": "object", "additionalProperties": true}, nil
 	}
 
 	if inputType.Kind() == reflect.Invalid {
@@ -295,19 +286,14 @@ func buildToolParameters(inputType reflect.Type) (map[string]any, error) {
 		return nil, fmt.Errorf("unsupported input type: %s", inputType.Kind())
 	}
 
-	// 对于非结构体输入，仍包装成单一属性对象，避免模型调用时结构不稳定。
 	valueSchema, err := schemaForType(inputType)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"type":       "object",
-		"properties": map[string]any{"value": valueSchema},
-		"required":   []string{"value"},
-	}, nil
+	return map[string]any{"type": "object", "properties": map[string]any{"value": valueSchema}, "required": []string{"value"}}, nil
 }
 
-// buildObjectSchema 根据 struct 生成 object schema。
+// buildObjectSchema 基于 struct 字段构建 object schema。
 func buildObjectSchema(inputType reflect.Type) (map[string]any, error) {
 	properties := make(map[string]any)
 	required := make([]string, 0)
@@ -336,19 +322,15 @@ func buildObjectSchema(inputType reflect.Type) (map[string]any, error) {
 		}
 	}
 
-	schema := map[string]any{
-		"type":       "object",
-		"properties": properties,
-	}
+	schema := map[string]any{"type": "object", "properties": properties}
 	if len(required) > 0 {
-		// 保持 required 顺序可预测，便于测试和调试。
 		sort.Strings(required)
 		schema["required"] = required
 	}
 	return schema, nil
 }
 
-// schemaForType 生成单个 Go 类型对应的 JSON Schema 片段。
+// schemaForType 把 Go 类型映射为 JSON Schema 片段。
 func schemaForType(t reflect.Type) (map[string]any, error) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -395,7 +377,7 @@ func schemaForType(t reflect.Type) (map[string]any, error) {
 	}
 }
 
-// jsonFieldName 返回字段对应的 JSON 名称，并标记是否应跳过。
+// jsonFieldName 返回字段 json 名称并标记是否忽略。
 func jsonFieldName(field reflect.StructField) (string, bool) {
 	tag := field.Tag.Get("json")
 	if tag == "-" {
@@ -412,7 +394,7 @@ func jsonFieldName(field reflect.StructField) (string, bool) {
 	return name, false
 }
 
-// isFieldRequired 根据 JSON tag 与字段类型判断字段是否必填。
+// isFieldRequired 根据 tag 和类型判断字段是否必填。
 func isFieldRequired(field reflect.StructField) bool {
 	toolTag := parseToolTag(field.Tag.Get("tool"))
 	if toolTag.required {
@@ -434,7 +416,7 @@ func isFieldRequired(field reflect.StructField) bool {
 	return true
 }
 
-// applyToolFieldTags 将字段上的 tool tag 解析并合并进 schema。
+// applyToolFieldTags 把 tool 标签写入字段 schema。
 func applyToolFieldTags(schema map[string]any, field reflect.StructField) map[string]any {
 	if schema == nil {
 		return nil
@@ -455,16 +437,21 @@ func applyToolFieldTags(schema map[string]any, field reflect.StructField) map[st
 	return schema
 }
 
-// toolTagOptions 保存 tool tag 解析结果。
+// toolTagOptions 是 tool 标签解析结果。
 type toolTagOptions struct {
-	description  string
-	required     bool
+	// description 是字段说明。
+	description string
+	// required 指示字段是否必填。
+	required bool
+	// defaultValue 是默认值。
 	defaultValue any
-	enumValues   []string
-	format       string
+	// enumValues 是枚举值列表。
+	enumValues []string
+	// format 是格式标记。
+	format string
 }
 
-// parseToolTag 解析形如 "desc=xxx;required;default=yyy;enum=a|b" 的 tag。
+// parseToolTag 解析形如 desc=xxx;required;default=yyy 的标签。
 func parseToolTag(raw string) toolTagOptions {
 	options := toolTagOptions{}
 	for _, item := range strings.Split(raw, ";") {
@@ -494,26 +481,4 @@ func parseToolTag(raw string) toolTagOptions {
 		}
 	}
 	return options
-}
-
-// cloneToolDefinitions 返回工具定义的浅拷贝，避免外部修改内部缓存。
-func cloneToolDefinitions(definitions []ToolDefinition) []ToolDefinition {
-	if len(definitions) == 0 {
-		return nil
-	}
-	result := make([]ToolDefinition, len(definitions))
-	copy(result, definitions)
-	return result
-}
-
-// cloneToolMapper 返回工具映射表的浅拷贝，避免外部修改内部缓存。
-func cloneToolMapper(mapper map[string]ToolFunc) map[string]ToolFunc {
-	if len(mapper) == 0 {
-		return nil
-	}
-	result := make(map[string]ToolFunc, len(mapper))
-	for name, tool := range mapper {
-		result[name] = tool
-	}
-	return result
 }

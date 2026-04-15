@@ -54,6 +54,18 @@ func LoadEnv(filePath string) (map[string]string, error) {
 	return result, nil
 }
 
+// GetEnv 从解析后的环境变量映射中读取键值。
+//
+// 语义与 Python 的 os.getenv(key, default) 一致：
+// 当键不存在时返回 defaultValue；当键存在时返回其原始值（即使为空字符串）。
+func GetEnv(envMap map[string]string, key string, defaultValue string) string {
+	value, ok := envMap[key]
+	if !ok {
+		return defaultValue
+	}
+	return value
+}
+
 // parseValue 解析 .env 的值字段，支持裸值、双引号值和注释尾随内容。
 func parseValue(valuePart string, lineNo int) (string, error) {
 	trimmed := strings.TrimSpace(valuePart)
