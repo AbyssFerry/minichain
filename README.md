@@ -515,26 +515,26 @@ func registerByStructuredTool() (*llm.ToolRegistry, error) {
 
 ```text
 minichain/
-├─ go.mod
-├─ .env.example
-├─ README.md
-├─ LICENSE
+├─ go.mod                          # Go 模块定义与依赖管理
+├─ .env.example                    # 环境变量示例模板
+├─ README.md                       # 项目说明与使用文档
+├─ LICENSE                         # 开源许可证（MIT）
 ├─ cmd/
 │  └─ minichain-cli/
-│     └─ main.go
+│     └─ main.go                   # CLI 程序入口
 ├─ llm/
-│  ├─ types.go
-│  ├─ chat_model.go
-│  ├─ agent.go
-│  ├─ tools_registry.go
-│  ├─ client_openai.go
-│  ├─ openai_protocol.go
-│  ├─ context_trim.go
-│  └─ *_test.go
+│  ├─ types.go                     # 公共类型定义（消息、输出、事件等）
+│  ├─ chat_model.go                # ChatModel 初始化与调用逻辑
+│  ├─ agent.go                     # ReAct Agent 流程与工具编排
+│  ├─ tools_registry.go            # 工具注册与执行器管理
+│  ├─ client_openai.go             # OpenAI 兼容客户端实现
+│  ├─ openai_protocol.go           # OpenAI 协议结构与转换
+│  ├─ context_trim.go              # 上下文裁剪策略与实现
+│  └─ *_test.go                    # llm 包相关单元测试
 └─ utils/
-   ├─ godotenv.go
-   ├─ message_debug.go
-   └─ *_test.go
+	├─ godotenv.go                  # .env 加载与环境变量读取
+	├─ message_debug.go             # 调试消息格式化与输出
+	└─ *_test.go                    # utils 包相关单元测试
 ```
 
 ## 9. 许可证
