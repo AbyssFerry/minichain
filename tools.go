@@ -47,46 +47,6 @@ type ToolExecutionCallbacks struct {
 	OnAfter func(call preparedToolCall, output string)
 }
 
-// defaultTools 返回默认注册给模型的函数工具定义。
-func defaultTools() []ToolDefinition {
-	return []ToolDefinition{
-		{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        "get_current_time",
-				Description: "当你想知道现在时间时非常有用。",
-				Parameters:  map[string]any{},
-			},
-		},
-		{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        "get_current_weather",
-				Description: "当你想查询指定城市天气时非常有用。",
-				Parameters: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"location": map[string]any{
-							"type":        "string",
-							"description": "城市或县区，比如北京市、杭州市、余杭区等。",
-						},
-					},
-					"required": []string{"location"},
-				},
-			},
-		},
-	}
-}
-
-// defaultToolMapper 返回工具名到本地处理函数的映射表。
-func defaultToolMapper() map[string]ToolFunc {
-	// 返回值是一个映射表，键是工具函数的名称(string类型)，值是对应的本地实现函数(ToolFunc类型)。
-	return map[string]ToolFunc{
-		"get_current_time":    getCurrentTime,
-		"get_current_weather": getCurrentWeather,
-	}
-}
-
 // runReactTurn 执行带工具调用的 ReAct 对话循环；cfg.MaxReactRounds 为 0 时不限制轮数。
 // 支持基于 usage 和错误的自动上下文裁剪。
 func runReactTurn(client ChatProvider, cfg Config, history *[]Message, stats *TurnRuntimeStats, userInput string) (string, error) {
@@ -306,19 +266,27 @@ func parseToolArguments(raw string) (map[string]any, error) {
 	return args, nil
 }
 
+// getCurrentTimeArgs 表示获取当前时间工具所需的入参。
+type getCurrentTimeArgs struct{}
+
 // getCurrentTime 返回当前本地时间字符串。
-func getCurrentTime(_ map[string]any) (string, error) {
+func getCurrentTime(_ getCurrentTimeArgs) (string, error) {
 	time.Sleep(1 * time.Second)
 
 	return fmt.Sprintf("当前时间：%s。", time.Now().Format("2006-01-02 15:04:05")), nil
 }
 
+// getCurrentWeatherArgs 表示查询天气工具所需的入参。
+type getCurrentWeatherArgs struct {
+	// Location 是需要查询天气的城市或县区名称。
+	Location string `json:"location" tool:"desc=城市或县区，比如北京市、杭州市、余杭区等。;required"`
+}
+
 // getCurrentWeather 根据 location 参数返回模拟天气信息。
-func getCurrentWeather(arguments map[string]any) (string, error) {
+func getCurrentWeather(arguments getCurrentWeatherArgs) (string, error) {
 	time.Sleep(2 * time.Second)
 
-	location, _ := arguments["location"].(string)
-	location = strings.TrimSpace(location)
+	location := strings.TrimSpace(arguments.Location)
 	if location == "" {
 		return "", errors.New("missing argument: location")
 	}
