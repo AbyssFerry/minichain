@@ -29,9 +29,9 @@ func main() {
 	// maxReactRounds 控制单次 ReAct 推理允许的最大轮数。
 	maxReactRounds := 20
 	// contextTrimTokenThreshold 控制触发历史裁剪与摘要的 token 阈值。
-	contextTrimTokenThreshold := 500
+	contextTrimTokenThreshold := 16000
 	// contextKeepRecentRounds 控制裁剪后保留的最近轮次数量。
-	contextKeepRecentRounds := 2
+	contextKeepRecentRounds := 5
 
 	model := utils.GetEnv(envMap, "MODEL", "")
 	apiKey := utils.GetEnv(envMap, "API_KEY", "")
@@ -269,5 +269,3 @@ func handleCommand(input string, mode string) (nextMode string, shouldExit bool,
 		return mode, false, false
 	}
 }
-
-
