@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"errors"
 	"testing"
@@ -40,3 +39,4 @@ func TestStreamResultWait(t *testing.T) {
 		t.Fatalf("unexpected summary: %+v", gotSummary)
 	}
 }
+

@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"context"
 	"time"
@@ -287,3 +286,4 @@ func cloneMessages(messages []Message) []Message {
 }
 
 // splitMessagesByRole 将消息按角色拆分。
+

@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"context"
 	"encoding/json"
@@ -10,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/abyssferry/zhitong-ai-agent/utils"
+	"github.com/abyssferry/minichain/utils"
 )
 
 // preparedToolCall 表示已校验并可执行的工具调用。
@@ -374,3 +373,4 @@ func parseToolArguments(raw string) (map[string]any, error) {
 	}
 	return args, nil
 }
+

@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"bufio"
 	"bytes"
@@ -341,3 +340,4 @@ func buildResponseMetadata(id, modelName, finishReason, systemFingerprint string
 		"logprobs":           logprobs,
 	}
 }
+

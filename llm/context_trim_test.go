@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"strings"
 	"testing"
@@ -37,3 +36,4 @@ func TestBuildSummaryPrompt(t *testing.T) {
 		t.Fatalf("unexpected prompt: %s", prompt)
 	}
 }
+

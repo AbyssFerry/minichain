@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"context"
 	"fmt"
@@ -122,3 +121,4 @@ func trimAndSummarizeHistoryContext(ctx context.Context, client ChatProvider, ke
 	}
 	return nil
 }
+

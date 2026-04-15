@@ -1,3 +1,3 @@
-module github.com/abyssferry/zhitong-ai-agent
+module github.com/abyssferry/minichain
 
 go 1.26.2

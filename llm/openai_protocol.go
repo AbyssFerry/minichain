@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 // Message 表示一次对话消息。
 type Message struct {
 	// Role 表示消息角色，例如 system、user、assistant、tool。
@@ -161,3 +160,4 @@ type chatAPIDelta struct {
 	// Refusal 是拒绝信息。
 	Refusal string `json:"refusal,omitempty"`
 }
+

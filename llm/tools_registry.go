@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"encoding/json"
 	"fmt"
@@ -482,3 +481,4 @@ func parseToolTag(raw string) toolTagOptions {
 	}
 	return options
 }
+

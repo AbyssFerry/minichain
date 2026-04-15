@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"context"
 	"fmt"
@@ -48,3 +47,4 @@ func TestChatStreamReturnsChunkError(t *testing.T) {
 		t.Fatalf("unexpected stream error: %v", waitErr)
 	}
 }
+

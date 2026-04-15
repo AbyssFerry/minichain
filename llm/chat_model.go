@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"context"
 	"fmt"
@@ -8,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/abyssferry/zhitong-ai-agent/utils"
+	"github.com/abyssferry/minichain/utils"
 )
 
 const defaultTurnTimeout = 90 * time.Second
@@ -305,3 +304,4 @@ func resolveRequestTimeout(configured *time.Duration) (time.Duration, error) {
 	}
 	return *configured, nil
 }
+

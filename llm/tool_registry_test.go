@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import "testing"
 
 // sampleNestedOptions 用于测试嵌套参数结构的 schema 生成。
@@ -175,3 +174,4 @@ func TestToolRegistry_RegisterFromHandlerRejectsNonStructArgument(t *testing.T) 
 		t.Fatal("expected register error for non-struct argument handler")
 	}
 }
+

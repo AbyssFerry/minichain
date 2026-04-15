@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/abyssferry/zhitong-ai-agent/langchain"
-	"github.com/abyssferry/zhitong-ai-agent/utils"
+	"github.com/abyssferry/minichain/llm"
+	"github.com/abyssferry/minichain/utils"
 )
 
 // main 是程序入口，负责初始化配置、创建客户端并启动交互式命令行会话。
@@ -38,7 +38,7 @@ func main() {
 	baseURL := utils.GetEnv(envMap, "BASE_URL", "")
 	debugMessages := utils.GetEnv(envMap, "DEBUG_MESSAGES", "") == "true"
 
-	chatModel, err := langchain.InitChatModel(langchain.ChatModelOptions{
+	chatModel, err := llm.InitChatModel(llm.ChatModelOptions{
 		Model:                     model,
 		SystemPrompt:              customSystemPrompt,
 		APIKey:                    apiKey,
@@ -53,7 +53,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	registry := langchain.NewToolRegistry()
+	registry := llm.NewToolRegistry()
 	if err := registry.RegisterFromHandler("get_current_time", "当你想知道现在时间时非常有用。", getCurrentTime); err != nil {
 		log.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	agent, err := langchain.CreateAgent(langchain.AgentOptions{
+	agent, err := llm.CreateAgent(llm.AgentOptions{
 		Model:                     model,
 		SystemPrompt:              customSystemPrompt,
 		APIKey:                    apiKey,
@@ -81,7 +81,7 @@ func main() {
 	mode := "chat"
 	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Println("LangChain 风格 Go CLI 已启动")
+	fmt.Println("minichain 风格 Go CLI 已启动")
 	fmt.Printf("示例: 本程序会在初始化时注入用户自定义系统提示词: %s\n", customSystemPrompt)
 	fmt.Printf("示例: 温度=%.1f\n", temperature)
 	fmt.Println("命令: /mode chat | /mode stream | /mode react | /clear | /help | /exit")
@@ -114,13 +114,13 @@ func main() {
 			continue
 		}
 
-		messages := []langchain.Message{
+		messages := []llm.Message{
 			{Role: "user", Content: input},
 		}
 
 		switch mode {
 		case "chat":
-			result, err := chatModel.Invoke(langchain.InvokeInput{Messages: messages})
+			result, err := chatModel.Invoke(llm.InvokeInput{Messages: messages})
 			if err != nil {
 				fmt.Printf("错误: %v\n", err)
 				continue
@@ -128,7 +128,7 @@ func main() {
 			fmt.Printf("助手: %s\n", result.Content)
 		case "stream":
 			fmt.Print("助手(流式): ")
-			result, err := chatModel.Stream(langchain.InvokeInput{Messages: messages})
+			result, err := chatModel.Stream(llm.InvokeInput{Messages: messages})
 			if err != nil {
 				fmt.Printf("错误: %v\n", err)
 				continue
@@ -152,7 +152,7 @@ func main() {
 			fmt.Printf("\n助手(完整): %s\n", contentBuilder.String())
 		case "react":
 			fmt.Print("助手(流式): ")
-			result, err := agent.Stream(langchain.InvokeInput{Messages: messages})
+			result, err := agent.Stream(llm.InvokeInput{Messages: messages})
 			if err != nil {
 				fmt.Printf("错误: %v\n", err)
 				continue
@@ -269,3 +269,5 @@ func handleCommand(input string, mode string) (nextMode string, shouldExit bool,
 		return mode, false, false
 	}
 }
+
+

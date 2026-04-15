@@ -1,5 +1,4 @@
-package langchain
-
+package llm
 import (
 	"testing"
 	"time"
@@ -70,3 +69,4 @@ func TestAgentWithRequestTimeout_UsesConfiguredDuration(t *testing.T) {
 		t.Fatalf("unexpected remaining timeout: %v", remaining)
 	}
 }
+
