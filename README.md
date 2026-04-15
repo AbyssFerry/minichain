@@ -33,7 +33,7 @@ import (
 MODEL=gpt-5-nano
 API_KEY=your_api_key
 BASE_URL=https://api.openai.com/v1
-DEBUG_MESSAGES=false
+DEBUG_MESSAGES=false # 是否输出调试消息
 ```
 
 ### 3.1 使用 LoadEnv 与 GetEnv
