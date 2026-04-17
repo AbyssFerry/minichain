@@ -1,4 +1,5 @@
 package llm
+
 import (
 	"context"
 	"fmt"
@@ -56,7 +57,7 @@ func InitChatModel(opts ChatModelOptions) (*ChatModel, error) {
 
 	systemPrompt := strings.TrimSpace(opts.SystemPrompt)
 
-	client, err := newOpenAICompatibleClient(opts.Model, opts.APIKey, opts.BaseURL, requestTimeout)
+	client, err := newOpenAICompatibleClient(opts.Model, opts.APIKey, opts.BaseURL, requestTimeout, opts.DebugRequestParams)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +79,7 @@ func InitChatModel(opts ChatModelOptions) (*ChatModel, error) {
 			PresencePenalty:  opts.PresencePenalty,
 			FrequencyPenalty: opts.FrequencyPenalty,
 			Seed:             opts.Seed,
+			Thinking:         cloneThinkingConfig(opts.Thinking),
 		},
 		requestTimeout:            requestTimeout,
 		contextTrimTokenThreshold: opts.ContextTrimTokenThreshold,
@@ -96,7 +98,7 @@ func (m *ChatModel) Invoke(input InvokeInput) (InvokeOutput, error) {
 	defer m.mu.Unlock()
 
 	if shouldTrimByUsage(m.state.Stats, m.contextTrimTokenThreshold) {
-		_ = trimAndSummarizeHistoryContext(turnCtx, m.client, m.contextKeepRecentRounds, &m.state.Messages, &m.state.Stats, "usage")
+		_ = trimAndSummarizeHistoryContext(turnCtx, m.client, m.contextKeepRecentRounds, &m.state.Messages, &m.state.Stats, "usage", m.requestDefaults.Thinking)
 	}
 
 	turnMessages := cloneMessages(input.Messages)
@@ -113,7 +115,7 @@ func (m *ChatModel) Invoke(input InvokeInput) (InvokeOutput, error) {
 
 	finishReason := extractFinishReason(resp)
 	if finishReason == "length" {
-		if trimErr := trimAndSummarizeHistoryContext(turnCtx, m.client, m.contextKeepRecentRounds, &m.state.Messages, &m.state.Stats, "finish_reason_length"); trimErr == nil {
+		if trimErr := trimAndSummarizeHistoryContext(turnCtx, m.client, m.contextKeepRecentRounds, &m.state.Messages, &m.state.Stats, "finish_reason_length", m.requestDefaults.Thinking); trimErr == nil {
 			requestMessages = append(m.state.CloneMessages(), turnMessages...)
 			request.Messages = cloneMessages(requestMessages)
 			resp, err = m.client.Chat(turnCtx, request)
@@ -181,7 +183,7 @@ func (m *ChatModel) runStreamTurn(inputMessages []Message, emit func(StreamEvent
 
 	m.mu.Lock()
 	if shouldTrimByUsage(m.state.Stats, m.contextTrimTokenThreshold) {
-		_ = trimAndSummarizeHistoryContext(turnCtx, m.client, m.contextKeepRecentRounds, &m.state.Messages, &m.state.Stats, "usage")
+		_ = trimAndSummarizeHistoryContext(turnCtx, m.client, m.contextKeepRecentRounds, &m.state.Messages, &m.state.Stats, "usage", m.requestDefaults.Thinking)
 	}
 	turnMessages := cloneMessages(inputMessages)
 	requestMessages := append(m.state.CloneMessages(), turnMessages...)
@@ -199,7 +201,7 @@ func (m *ChatModel) runStreamTurn(inputMessages []Message, emit func(StreamEvent
 		m.state.AppendMessages(Message{Role: "assistant", Content: summary.Content, ToolCalls: summary.ToolCalls})
 		m.debugPrintMessages("chat_stream_state_messages", m.state.Messages)
 		if summary.FinishReason == "length" {
-			_ = trimAndSummarizeHistoryContext(turnCtx, m.client, m.contextKeepRecentRounds, &m.state.Messages, &m.state.Stats, "finish_reason_length")
+			_ = trimAndSummarizeHistoryContext(turnCtx, m.client, m.contextKeepRecentRounds, &m.state.Messages, &m.state.Stats, "finish_reason_length", m.requestDefaults.Thinking)
 		}
 		m.mu.Unlock()
 	}
@@ -304,4 +306,3 @@ func resolveRequestTimeout(configured *time.Duration) (time.Duration, error) {
 	}
 	return *configured, nil
 }
-

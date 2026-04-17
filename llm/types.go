@@ -1,4 +1,5 @@
 package llm
+
 import (
 	"context"
 	"time"
@@ -10,6 +11,12 @@ type State struct {
 	Messages []Message
 	// Stats 是最近一次请求运行统计。
 	Stats TurnRuntimeStats
+}
+
+// ThinkingConfig 表示 Kimi 系列模型的深度思考开关配置。
+type ThinkingConfig struct {
+	// Type 表示思考模式类型，取值为 enabled 或 disabled。
+	Type string `json:"type"`
 }
 
 // NewState 创建空状态。
@@ -76,6 +83,10 @@ type ChatModelOptions struct {
 	RequestTimeout *time.Duration
 	// DebugMessages 控制是否打印请求与状态消息列表调试信息。
 	DebugMessages bool
+	// DebugRequestParams 控制是否打印发送给模型接口的请求参数调试信息。
+	DebugRequestParams bool
+	// Thinking 是 Kimi 模型的深度思考控制参数。
+	Thinking *ThinkingConfig
 }
 
 // AgentOptions 定义 create_agent 所需配置。
@@ -114,6 +125,10 @@ type AgentOptions struct {
 	RequestTimeout *time.Duration
 	// DebugMessages 控制是否打印请求与状态消息列表调试信息。
 	DebugMessages bool
+	// DebugRequestParams 控制是否打印发送给模型接口的请求参数调试信息。
+	DebugRequestParams bool
+	// Thinking 是 Kimi 模型的深度思考控制参数。
+	Thinking *ThinkingConfig
 }
 
 // InvokeInput 定义 invoke 的输入。
@@ -257,6 +272,8 @@ type ChatRequest struct {
 	ToolChoice any `json:"tool_choice,omitempty"`
 	// StreamOptions 是流式附加参数。
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	// Thinking 是 Kimi 模型的深度思考控制参数。
+	Thinking *ThinkingConfig `json:"thinking,omitempty"`
 }
 
 // TurnRuntimeStats 记录最近一次请求运行状态。
@@ -285,5 +302,13 @@ func cloneMessages(messages []Message) []Message {
 	return result
 }
 
-// splitMessagesByRole 将消息按角色拆分。
+// cloneThinkingConfig 返回 thinking 配置副本。
+func cloneThinkingConfig(config *ThinkingConfig) *ThinkingConfig {
+	if config == nil {
+		return nil
+	}
+	cloned := *config
+	return &cloned
+}
 
+// splitMessagesByRole 将消息按角色拆分。

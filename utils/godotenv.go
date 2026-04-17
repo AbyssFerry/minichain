@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -64,6 +65,101 @@ func GetEnv(envMap map[string]string, key string, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// GetEnvBool 从解析后的环境变量映射中读取布尔值。
+//
+// 支持 true/false、1/0、yes/no、on/off（大小写不敏感），
+// 解析失败时返回 defaultValue。
+func GetEnvBool(envMap map[string]string, key string, defaultValue bool) bool {
+	raw := strings.TrimSpace(GetEnv(envMap, key, ""))
+	if raw == "" {
+		return defaultValue
+	}
+
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+// GetEnvInt 从解析后的环境变量映射中读取整数值。
+//
+// 当键缺失或解析失败时返回 defaultValue。
+func GetEnvInt(envMap map[string]string, key string, defaultValue int) int {
+	raw := strings.TrimSpace(GetEnv(envMap, key, ""))
+	if raw == "" {
+		return defaultValue
+	}
+
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+// GetEnvIntPtr 从解析后的环境变量映射中读取可空整数值。
+//
+// 当键缺失或为空时返回 nil；解析失败时也返回 nil。
+func GetEnvIntPtr(envMap map[string]string, key string) *int {
+	raw := strings.TrimSpace(GetEnv(envMap, key, ""))
+	if raw == "" {
+		return nil
+	}
+
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil
+	}
+	return &parsed
+}
+
+// GetEnvFloat64Ptr 从解析后的环境变量映射中读取可空浮点值。
+//
+// 当键缺失或为空时返回 nil；解析失败时也返回 nil。
+func GetEnvFloat64Ptr(envMap map[string]string, key string) *float64 {
+	raw := strings.TrimSpace(GetEnv(envMap, key, ""))
+	if raw == "" {
+		return nil
+	}
+
+	parsed, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil
+	}
+	return &parsed
+}
+
+// GetEnvCSV 从解析后的环境变量映射中读取逗号分隔字符串列表。
+//
+// 读取规则：
+// 1. 键缺失时使用 defaultValue；
+// 2. 为空字符串时返回 nil；
+// 3. 会自动 trim 每个元素并过滤空元素。
+func GetEnvCSV(envMap map[string]string, key string, defaultValue string) []string {
+	raw := strings.TrimSpace(GetEnv(envMap, key, defaultValue))
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		result = append(result, item)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // parseValue 解析 .env 的值字段，支持裸值、双引号值和注释尾随内容。

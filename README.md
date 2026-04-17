@@ -30,13 +30,144 @@ import (
 `.env` 示例：
 
 ```env
-MODEL=gpt-5-nano
-API_KEY=your_api_key
-BASE_URL=https://api.openai.com/v1
-DEBUG_MESSAGES=false # 是否输出调试消息
+# =========================
+# 必填：服务提供商配置
+# =========================
+
+# 填写规则（建议先看）：
+# 1) 本文件中“必填”项必须填写，否则程序启动会失败。
+# 2) 一般情况下可不加双引号，例如：MODEL=gpt-5-nano。
+# 3) 当值中包含空格、#、制表符，或你希望保留前后空白时，请使用双引号。
+#    例如：SYSTEM_PROMPT="你是我的助手 #请保留这段文本"
+# 4) 布尔值建议使用 true/false（不区分大小写）。
+# 5) 列表值（如 STOP）使用英文逗号分隔，例如：STOP=END,STOP。
+
+# 模型名称（必填），例如 gpt-5-nano / kimi-k2.5
+MODEL=
+
+# OpenAI 兼容服务的 API Key（必填）
+API_KEY=
+
+# OpenAI 兼容 API 的 Base URL（必填）
+# 支持例如 https://api.openai.com/v1 这样的基础地址
+BASE_URL=
+
+# =========================
+# 可选：提示词与运行参数
+# =========================
+
+# 会话初始化时注入的系统提示词（可选）
+# 建议：包含空格或 # 时使用双引号
+SYSTEM_PROMPT=
+
+# 单次请求超时时间（秒，可选）
+# 留空时使用默认值：90
+REQUEST_TIMEOUT_SECONDS=
+
+# 单次调用允许的最大 ReAct 轮数（可选，0 表示不限制）
+# 留空时使用默认值：20
+MAX_REACT_ROUNDS=
+
+# 按 token 用量触发上下文裁剪的阈值（可选）
+# 留空时使用默认值：16000
+CONTEXT_TRIM_TOKEN_THRESHOLD=
+
+# 裁剪后保留的最近轮次数（可选）
+# 留空时使用默认值：5
+CONTEXT_KEEP_RECENT_ROUNDS=
+
+# =========================
+# 可选：模型采样参数
+# =========================
+
+# 采样温度（可选），通常范围为 [0.0, 2.0]
+TEMPERATURE=
+
+# Nucleus sampling 的 top-p（可选），通常范围为 [0.0, 1.0]
+TOP_P=
+
+# 最大输出 token 数（可选）
+MAX_TOKENS=
+
+# Presence penalty（可选），通常范围为 [-2.0, 2.0]
+PRESENCE_PENALTY=
+
+# Frequency penalty（可选），通常范围为 [-2.0, 2.0]
+FREQUENCY_PENALTY=
+
+# 随机种子（可选，用于结果复现）
+SEED=
+
+# 逗号分隔的停止序列（可选），例如 END,STOP
+STOP=
+
+# =========================
+# 可选：功能开关
+# =========================
+
+# 模型支持时是否开启 Kimi thinking 模式（可选，true/false）
+# 留空时使用默认值：false
+ENABLE_THINKING=
+
+# 是否输出消息级调试日志（可选，true/false）
+# 留空时使用默认值：false
+DEBUG_MESSAGES=
+
+# 是否输出 invoke 与 stream 的全部请求参数（可选，true/false）
+# 留空时使用默认值：false
+# 输出会保留全部字段（包括空值/null），并对敏感模式做脱敏。
+DEBUG_REQUEST_PARAMS=
 ```
 
-### 3.1 使用 LoadEnv 与 GetEnv
+#### BASE_URL 格式说明
+
+`BASE_URL` 支持原生格式，系统会自动补充缺失的路径段至完整的 `/v1/chat/completions`：
+
+### 3.1 godotenv 功能函数总览
+
+`utils/godotenv.go` 提供两类能力：
+
+1. `.env` 文件解析：`LoadEnv`
+2. 类型安全读取：`GetEnv` 系列函数
+
+函数说明：
+
+| 函数 | 作用 | 缺失键行为 | 解析失败行为 |
+| --- | --- | --- | --- |
+| `LoadEnv(filePath)` | 解析 `.env` 文件并返回 `map[string]string` | 不适用 | 返回错误 |
+| `GetEnv(envMap, key, defaultValue)` | 读取字符串 | 返回 `defaultValue` | 不适用 |
+| `GetEnvBool(envMap, key, defaultValue)` | 读取布尔值 | 返回 `defaultValue` | 返回 `defaultValue` |
+| `GetEnvInt(envMap, key, defaultValue)` | 读取整数 | 返回 `defaultValue` | 返回 `defaultValue` |
+| `GetEnvIntPtr(envMap, key)` | 读取可空整数 | 返回 `nil` | 返回 `nil` |
+| `GetEnvFloat64Ptr(envMap, key)` | 读取可空浮点数 | 返回 `nil` | 返回 `nil` |
+| `GetEnvCSV(envMap, key, defaultValue)` | 读取逗号分隔字符串列表 | 使用 `defaultValue` 再解析 | 返回过滤后的结果，空则 `nil` |
+
+`LoadEnv` 解析规则：
+
+1. 忽略空行和以 `#` 开头的注释行。
+2. 同名键后者覆盖前者。
+3. 裸值中仅当 `#` 前是空白字符时，后续内容视为行内注释。
+4. 支持双引号值与转义：`\n`、`\r`、`\t`、`\"`、`\\`。
+5. 非法格式会直接报错并返回（例如缺少 `=`、引号未闭合、非法转义）。
+
+### 3.2 值格式与双引号约定
+
+是否需要双引号：
+
+1. 普通值通常不需要双引号，例如：`MODEL=gpt-5-nano`。
+2. 当值包含空格、`#`、制表符，或你希望保留前后空白时，建议使用双引号。
+3. 数值与布尔值建议不加引号，便于类型函数直接解析。
+
+推荐写法：
+
+```env
+SYSTEM_PROMPT="你是我的助手 #请保留"
+DEBUG_MESSAGES=true
+REQUEST_TIMEOUT_SECONDS=90
+STOP=END,STOP
+```
+
+### 3.3 使用示例（推荐）
 
 ```go
 package main
@@ -57,12 +188,20 @@ func main() {
 	model := utils.GetEnv(envMap, "MODEL", "")
 	apiKey := utils.GetEnv(envMap, "API_KEY", "")
 	baseURL := utils.GetEnv(envMap, "BASE_URL", "")
-	debug := utils.GetEnv(envMap, "DEBUG_MESSAGES", "false")
+	debugMessages := utils.GetEnvBool(envMap, "DEBUG_MESSAGES", false)
+	requestTimeoutSeconds := utils.GetEnvInt(envMap, "REQUEST_TIMEOUT_SECONDS", 90)
+	temperature := utils.GetEnvFloat64Ptr(envMap, "TEMPERATURE")
+	maxTokens := utils.GetEnvIntPtr(envMap, "MAX_TOKENS")
+	stop := utils.GetEnvCSV(envMap, "STOP", "")
 
 	fmt.Println("MODEL:", model)
 	fmt.Println("API_KEY 是否存在:", apiKey != "")
 	fmt.Println("BASE_URL:", baseURL)
-	fmt.Println("DEBUG_MESSAGES:", debug)
+	fmt.Println("DEBUG_MESSAGES:", debugMessages)
+	fmt.Println("REQUEST_TIMEOUT_SECONDS:", requestTimeoutSeconds)
+	fmt.Println("TEMPERATURE 是否设置:", temperature != nil)
+	fmt.Println("MAX_TOKENS 是否设置:", maxTokens != nil)
+	fmt.Println("STOP:", stop)
 }
 ```
 

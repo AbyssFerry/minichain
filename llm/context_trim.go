@@ -1,4 +1,5 @@
 package llm
+
 import (
 	"context"
 	"fmt"
@@ -63,12 +64,12 @@ func buildSummaryPrompt(messages []Message) string {
 }
 
 // summarizeMessages 调用模型生成历史摘要。
-func summarizeMessages(ctx context.Context, client ChatProvider, messages []Message) (string, error) {
+func summarizeMessages(ctx context.Context, client ChatProvider, messages []Message, thinking *ThinkingConfig) (string, error) {
 	systemMsg := Message{Role: "system", Content: "你是一个有帮助的助手。"}
 	summaryPrompt := buildSummaryPrompt(messages)
 	userMsg := Message{Role: "user", Content: summaryPrompt}
 
-	resp, err := client.Chat(ctx, ChatRequest{Messages: []Message{systemMsg, userMsg}})
+	resp, err := client.Chat(ctx, ChatRequest{Messages: []Message{systemMsg, userMsg}, Thinking: cloneThinkingConfig(thinking)})
 	if err != nil {
 		return "", fmt.Errorf("failed to summarize messages: %w", err)
 	}
@@ -96,7 +97,7 @@ func spliceSummaryIntoHistory(history *[]Message, summary string, keepRecentRoun
 }
 
 // trimAndSummarizeHistoryContext 执行历史裁剪和摘要。
-func trimAndSummarizeHistoryContext(ctx context.Context, client ChatProvider, keepRecentRounds int, history *[]Message, stats *TurnRuntimeStats, trimReason string) error {
+func trimAndSummarizeHistoryContext(ctx context.Context, client ChatProvider, keepRecentRounds int, history *[]Message, stats *TurnRuntimeStats, trimReason string, thinking *ThinkingConfig) error {
 	if keepRecentRounds <= 0 {
 		return nil
 	}
@@ -107,7 +108,7 @@ func trimAndSummarizeHistoryContext(ctx context.Context, client ChatProvider, ke
 	}
 
 	toSummarize := (*history)[startIdx:endIdx]
-	summary, err := summarizeMessages(ctx, client, toSummarize)
+	summary, err := summarizeMessages(ctx, client, toSummarize, thinking)
 	if err != nil {
 		return fmt.Errorf("summarization failed: %w", err)
 	}
@@ -121,4 +122,3 @@ func trimAndSummarizeHistoryContext(ctx context.Context, client ChatProvider, ke
 	}
 	return nil
 }
-

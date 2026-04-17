@@ -1,4 +1,5 @@
 package llm
+
 import (
 	"bufio"
 	"bytes"
@@ -7,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -21,17 +24,19 @@ type openAICompatibleClient struct {
 	endpoint string
 	// httpClient 执行 HTTP 请求。
 	httpClient *http.Client
+	// debugRequestParams 控制是否打印请求参数调试信息。
+	debugRequestParams bool
 }
 
 // newOpenAICompatibleClient 创建 OpenAI 兼容协议客户端。
-func newOpenAICompatibleClient(model, apiKey, baseURL string, timeout time.Duration) (*openAICompatibleClient, error) {
+func newOpenAICompatibleClient(model, apiKey, baseURL string, timeout time.Duration, debugRequestParams bool) (*openAICompatibleClient, error) {
 	if timeout <= 0 {
 		timeout = defaultTurnTimeout
 	}
 
 	endpoint := strings.TrimRight(baseURL, "/")
-	if !strings.HasSuffix(endpoint, "/chat/completions") {
-		endpoint += "/chat/completions"
+	if !strings.HasSuffix(endpoint, "/v1/chat/completions") {
+		endpoint += "/v1/chat/completions"
 	}
 
 	return &openAICompatibleClient{
@@ -41,12 +46,14 @@ func newOpenAICompatibleClient(model, apiKey, baseURL string, timeout time.Durat
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
+		debugRequestParams: debugRequestParams,
 	}, nil
 }
 
 // Chat 发送非流式请求并解析 JSON 响应。
 func (c *openAICompatibleClient) Chat(ctx context.Context, req ChatRequest) (*chatAPIResponse, error) {
 	body := c.buildRequest(req, false)
+	c.debugPrintRequestParams("invoke", body)
 	respBody, err := c.sendJSON(ctx, body)
 	if err != nil {
 		return nil, err
@@ -69,6 +76,7 @@ func (c *openAICompatibleClient) ChatStream(ctx context.Context, req ChatRequest
 
 	go func() {
 		body := c.buildRequest(req, true)
+		c.debugPrintRequestParams("stream", body)
 		payload, err := json.Marshal(body)
 		if err != nil {
 			result.finish(StreamSummary{}, fmt.Errorf("failed to marshal request body: %w", err))
@@ -201,6 +209,7 @@ func (c *openAICompatibleClient) buildRequest(req ChatRequest, stream bool) chat
 	if model == "" {
 		model = c.model
 	}
+	thinking := effectiveThinkingConfig(model, req.Thinking)
 	return chatAPIRequest{
 		Model:             model,
 		Messages:          cloneMessages(req.Messages),
@@ -216,7 +225,21 @@ func (c *openAICompatibleClient) buildRequest(req ChatRequest, stream bool) chat
 		ParallelToolCalls: req.ParallelToolCalls,
 		ToolChoice:        req.ToolChoice,
 		StreamOptions:     req.StreamOptions,
+		Thinking:          thinking,
 	}
+}
+
+// effectiveThinkingConfig 返回适用于当前模型的 thinking 配置。
+func effectiveThinkingConfig(model string, thinking *ThinkingConfig) *ThinkingConfig {
+	if !isKimiModel(model) {
+		return nil
+	}
+	return cloneThinkingConfig(thinking)
+}
+
+// isKimiModel 判断模型名是否属于 Kimi 系列。
+func isKimiModel(model string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "kimi")
 }
 
 // sendJSON 发送标准 JSON 请求并返回响应字节。
@@ -249,6 +272,85 @@ func (c *openAICompatibleClient) sendJSON(ctx context.Context, body chatAPIReque
 	}
 
 	return bodyText, nil
+}
+
+var (
+	openAIKeyPattern  = regexp.MustCompile(`\b(sk-[A-Za-z0-9\-_]+)\b`)
+	bearerPattern     = regexp.MustCompile(`(?i)bearer\s+[^\s"']+`)
+	jsonAPIKeyPattern = regexp.MustCompile(`(?i)("api[_-]?key"\s*:\s*")([^"]*)(")`)
+	apiKeyPattern     = regexp.MustCompile(`(?i)(api[_-]?key\s*[:=]\s*)([^\s"']+)`)
+)
+
+// debugPrintRequestParams 在开启调试时输出请求参数（含空值字段）。
+func (c *openAICompatibleClient) debugPrintRequestParams(mode string, body chatAPIRequest) {
+	if c == nil || !c.debugRequestParams {
+		return
+	}
+
+	debugPayload, err := json.MarshalIndent(sanitizeRequestForDebug(body), "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[debug][request_params][%s] marshal failed: %v\n", mode, err)
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "\n[debug][request_params][%s]\n%s\n", mode, string(debugPayload))
+}
+
+// sanitizeRequestForDebug 对请求体进行脱敏并保留完整字段。
+func sanitizeRequestForDebug(body chatAPIRequest) map[string]any {
+	return map[string]any{
+		"model":               body.Model,
+		"messages":            sanitizeMessagesForDebug(body.Messages),
+		"temperature":         body.Temperature,
+		"top_p":               body.TopP,
+		"max_tokens":          body.MaxTokens,
+		"stop":                append([]string(nil), body.Stop...),
+		"presence_penalty":    body.PresencePenalty,
+		"frequency_penalty":   body.FrequencyPenalty,
+		"seed":                body.Seed,
+		"stream":              body.Stream,
+		"tools":               cloneToolDefinitions(body.Tools),
+		"parallel_tool_calls": body.ParallelToolCalls,
+		"tool_choice":         body.ToolChoice,
+		"stream_options":      body.StreamOptions,
+		"thinking":            cloneThinkingConfig(body.Thinking),
+	}
+}
+
+// sanitizeMessagesForDebug 脱敏消息内容，避免调试日志泄漏敏感片段。
+func sanitizeMessagesForDebug(messages []Message) []Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	result := make([]Message, len(messages))
+	for i, message := range messages {
+		message.Content = redactSensitiveText(message.Content)
+		message.ToolCallID = redactSensitiveText(message.ToolCallID)
+		if len(message.ToolCalls) > 0 {
+			toolCalls := make([]ToolCall, len(message.ToolCalls))
+			for idx, call := range message.ToolCalls {
+				call.ID = redactSensitiveText(call.ID)
+				call.Function.Name = redactSensitiveText(call.Function.Name)
+				call.Function.Arguments = redactSensitiveText(call.Function.Arguments)
+				toolCalls[idx] = call
+			}
+			message.ToolCalls = toolCalls
+		}
+		result[i] = message
+	}
+	return result
+}
+
+// redactSensitiveText 对文本中的常见密钥模式做脱敏。
+func redactSensitiveText(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return raw
+	}
+	redacted := openAIKeyPattern.ReplaceAllString(raw, "[REDACTED_OPENAI_KEY]")
+	redacted = bearerPattern.ReplaceAllString(redacted, "Bearer [REDACTED]")
+	redacted = jsonAPIKeyPattern.ReplaceAllString(redacted, `${1}[REDACTED]${3}`)
+	redacted = apiKeyPattern.ReplaceAllString(redacted, "${1}[REDACTED]")
+	return redacted
 }
 
 // mergeStreamToolCalls 合并流式工具调用增量。
@@ -340,4 +442,3 @@ func buildResponseMetadata(id, modelName, finishReason, systemFingerprint string
 		"logprobs":           logprobs,
 	}
 }
-

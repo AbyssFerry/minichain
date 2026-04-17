@@ -1,4 +1,5 @@
 package llm
+
 import (
 	"context"
 	"encoding/json"
@@ -94,7 +95,7 @@ func CreateAgent(opts AgentOptions) (*Agent, error) {
 		registry = NewToolRegistry()
 	}
 
-	client, err := newOpenAICompatibleClient(opts.Model, opts.APIKey, opts.BaseURL, requestTimeout)
+	client, err := newOpenAICompatibleClient(opts.Model, opts.APIKey, opts.BaseURL, requestTimeout, opts.DebugRequestParams)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +117,7 @@ func CreateAgent(opts AgentOptions) (*Agent, error) {
 			PresencePenalty:  opts.PresencePenalty,
 			FrequencyPenalty: opts.FrequencyPenalty,
 			Seed:             opts.Seed,
+			Thinking:         cloneThinkingConfig(opts.Thinking),
 		},
 		requestTimeout:            requestTimeout,
 		maxReactRounds:            opts.MaxReactRounds,
@@ -175,7 +177,7 @@ func (a *Agent) runReActTurn(inputMessages []Message, emit func(StreamEvent)) (I
 
 	a.mu.Lock()
 	if shouldTrimByUsage(a.state.Stats, a.contextTrimTokenThreshold) {
-		_ = trimAndSummarizeHistoryContext(turnCtx, a.client, a.contextKeepRecentRounds, &a.state.Messages, &a.state.Stats, "usage")
+		_ = trimAndSummarizeHistoryContext(turnCtx, a.client, a.contextKeepRecentRounds, &a.state.Messages, &a.state.Stats, "usage", a.requestDefaults.Thinking)
 	}
 	turnMessages := cloneMessages(inputMessages)
 	requestMessages := append(a.state.CloneMessages(), turnMessages...)
@@ -220,7 +222,7 @@ func (a *Agent) runReActTurn(inputMessages []Message, emit func(StreamEvent)) (I
 			}
 			if summary.FinishReason == "length" {
 				a.mu.Lock()
-				_ = trimAndSummarizeHistoryContext(turnCtx, a.client, a.contextKeepRecentRounds, &a.state.Messages, &a.state.Stats, "finish_reason_length")
+				_ = trimAndSummarizeHistoryContext(turnCtx, a.client, a.contextKeepRecentRounds, &a.state.Messages, &a.state.Stats, "finish_reason_length", a.requestDefaults.Thinking)
 				a.mu.Unlock()
 			}
 			return finalOutput, nil
@@ -373,4 +375,3 @@ func parseToolArguments(raw string) (map[string]any, error) {
 	}
 	return args, nil
 }
-

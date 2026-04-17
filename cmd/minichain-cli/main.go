@@ -22,32 +22,57 @@ func main() {
 	}
 
 	customSystemPrompt := "你是我的小助手"
-	temperature := 0.3
+	customSystemPrompt = utils.GetEnv(envMap, "SYSTEM_PROMPT", customSystemPrompt)
+
 	// requestTimeout 控制单轮模型请求的超时时间。
-	requestTimeout := 90 * time.Second
+	requestTimeoutSeconds := utils.GetEnvInt(envMap, "REQUEST_TIMEOUT_SECONDS", 90)
+	requestTimeout := time.Duration(requestTimeoutSeconds) * time.Second
 
 	// maxReactRounds 控制单次 ReAct 推理允许的最大轮数。
-	maxReactRounds := 20
+	maxReactRounds := utils.GetEnvInt(envMap, "MAX_REACT_ROUNDS", 20)
 	// contextTrimTokenThreshold 控制触发历史裁剪与摘要的 token 阈值。
-	contextTrimTokenThreshold := 16000
+	contextTrimTokenThreshold := utils.GetEnvInt(envMap, "CONTEXT_TRIM_TOKEN_THRESHOLD", 16000)
 	// contextKeepRecentRounds 控制裁剪后保留的最近轮次数量。
-	contextKeepRecentRounds := 5
+	contextKeepRecentRounds := utils.GetEnvInt(envMap, "CONTEXT_KEEP_RECENT_ROUNDS", 5)
 
 	model := utils.GetEnv(envMap, "MODEL", "")
 	apiKey := utils.GetEnv(envMap, "API_KEY", "")
 	baseURL := utils.GetEnv(envMap, "BASE_URL", "")
-	debugMessages := utils.GetEnv(envMap, "DEBUG_MESSAGES", "") == "true"
+	temperature := utils.GetEnvFloat64Ptr(envMap, "TEMPERATURE")
+	topP := utils.GetEnvFloat64Ptr(envMap, "TOP_P")
+	maxTokens := utils.GetEnvIntPtr(envMap, "MAX_TOKENS")
+	presencePenalty := utils.GetEnvFloat64Ptr(envMap, "PRESENCE_PENALTY")
+	frequencyPenalty := utils.GetEnvFloat64Ptr(envMap, "FREQUENCY_PENALTY")
+	seed := utils.GetEnvIntPtr(envMap, "SEED")
+	stop := utils.GetEnvCSV(envMap, "STOP", "")
+
+	debugMessages := utils.GetEnvBool(envMap, "DEBUG_MESSAGES", false)
+	debugRequestParams := utils.GetEnvBool(envMap, "DEBUG_REQUEST_PARAMS", false)
+	thinkingEnabled := utils.GetEnvBool(envMap, "ENABLE_THINKING", false)
+	thinking := &llm.ThinkingConfig{Type: "disabled"}
+	if thinkingEnabled {
+		thinking.Type = "enabled"
+	}
 
 	chatModel, err := llm.InitChatModel(llm.ChatModelOptions{
 		Model:                     model,
 		SystemPrompt:              customSystemPrompt,
 		APIKey:                    apiKey,
 		BaseURL:                   baseURL,
+		Temperature:               temperature,
+		TopP:                      topP,
+		MaxTokens:                 maxTokens,
+		Stop:                      stop,
+		PresencePenalty:           presencePenalty,
+		FrequencyPenalty:          frequencyPenalty,
+		Seed:                      seed,
 		ContextTrimTokenThreshold: contextTrimTokenThreshold,
 		ContextKeepRecentRounds:   contextKeepRecentRounds,
-		Temperature:               &temperature,
-		RequestTimeout:            &requestTimeout,
-		DebugMessages:             debugMessages,
+
+		RequestTimeout:     &requestTimeout,
+		DebugMessages:      debugMessages,
+		DebugRequestParams: debugRequestParams,
+		Thinking:           thinking,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -66,13 +91,21 @@ func main() {
 		SystemPrompt:              customSystemPrompt,
 		APIKey:                    apiKey,
 		BaseURL:                   baseURL,
+		Temperature:               temperature,
+		TopP:                      topP,
+		MaxTokens:                 maxTokens,
+		Stop:                      stop,
+		PresencePenalty:           presencePenalty,
+		FrequencyPenalty:          frequencyPenalty,
+		Seed:                      seed,
 		MaxReactRounds:            maxReactRounds,
 		Tools:                     registry,
 		ContextTrimTokenThreshold: contextTrimTokenThreshold,
 		ContextKeepRecentRounds:   contextKeepRecentRounds,
-		Temperature:               &temperature,
 		RequestTimeout:            &requestTimeout,
 		DebugMessages:             debugMessages,
+		DebugRequestParams:        debugRequestParams,
+		Thinking:                  thinking,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -83,7 +116,6 @@ func main() {
 
 	fmt.Println("minichain 风格 Go CLI 已启动")
 	fmt.Printf("示例: 本程序会在初始化时注入用户自定义系统提示词: %s\n", customSystemPrompt)
-	fmt.Printf("示例: 温度=%.1f\n", temperature)
 	fmt.Println("命令: /mode chat | /mode stream | /mode react | /clear | /help | /exit")
 
 	for {

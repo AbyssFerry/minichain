@@ -1,4 +1,5 @@
 package llm
+
 // Message 表示一次对话消息。
 type Message struct {
 	// Role 表示消息角色，例如 system、user、assistant、tool。
@@ -99,6 +100,8 @@ type chatAPIRequest struct {
 	ToolChoice any `json:"tool_choice,omitempty"`
 	// StreamOptions 是流式附加参数。
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	// Thinking 是 Kimi 模型的深度思考控制参数。
+	Thinking *ThinkingConfig `json:"thinking,omitempty"`
 }
 
 // chatAPIResponse 表示 OpenAI 兼容接口响应体。
@@ -160,4 +163,3 @@ type chatAPIDelta struct {
 	// Refusal 是拒绝信息。
 	Refusal string `json:"refusal,omitempty"`
 }
-
