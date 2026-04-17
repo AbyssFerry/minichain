@@ -34,14 +34,6 @@ import (
 # 必填：服务提供商配置
 # =========================
 
-# 填写规则（建议先看）：
-# 1) 本文件中“必填”项必须填写，否则程序启动会失败。
-# 2) 一般情况下可不加双引号，例如：MODEL=gpt-5-nano。
-# 3) 当值中包含空格、#、制表符，或你希望保留前后空白时，请使用双引号。
-#    例如：SYSTEM_PROMPT="你是我的助手 #请保留这段文本"
-# 4) 布尔值建议使用 true/false（不区分大小写）。
-# 5) 列表值（如 STOP）使用英文逗号分隔，例如：STOP=END,STOP。
-
 # 模型名称（必填），例如 gpt-5-nano / kimi-k2.5
 MODEL=
 
@@ -52,54 +44,6 @@ API_KEY=
 # 支持例如 https://api.openai.com/v1 这样的基础地址
 BASE_URL=
 
-# =========================
-# 可选：提示词与运行参数
-# =========================
-
-# 会话初始化时注入的系统提示词（可选）
-# 建议：包含空格或 # 时使用双引号
-SYSTEM_PROMPT=
-
-# 单次请求超时时间（秒，可选）
-# 留空时使用默认值：90
-REQUEST_TIMEOUT_SECONDS=
-
-# 单次调用允许的最大 ReAct 轮数（可选，0 表示不限制）
-# 留空时使用默认值：20
-MAX_REACT_ROUNDS=
-
-# 按 token 用量触发上下文裁剪的阈值（可选）
-# 留空时使用默认值：16000
-CONTEXT_TRIM_TOKEN_THRESHOLD=
-
-# 裁剪后保留的最近轮次数（可选）
-# 留空时使用默认值：5
-CONTEXT_KEEP_RECENT_ROUNDS=
-
-# =========================
-# 可选：模型采样参数
-# =========================
-
-# 采样温度（可选），通常范围为 [0.0, 2.0]
-TEMPERATURE=
-
-# Nucleus sampling 的 top-p（可选），通常范围为 [0.0, 1.0]
-TOP_P=
-
-# 最大输出 token 数（可选）
-MAX_TOKENS=
-
-# Presence penalty（可选），通常范围为 [-2.0, 2.0]
-PRESENCE_PENALTY=
-
-# Frequency penalty（可选），通常范围为 [-2.0, 2.0]
-FREQUENCY_PENALTY=
-
-# 随机种子（可选，用于结果复现）
-SEED=
-
-# 逗号分隔的停止序列（可选），例如 END,STOP
-STOP=
 
 # =========================
 # 可选：功能开关
@@ -569,8 +513,53 @@ func registerByStructuredTool() (*llm.ToolRegistry, error) {
 | Seed | *int | 否 | nil | 随机种子 |
 | RequestTimeout | *time.Duration | 否 | 90s | 单轮请求超时，必须大于 0 |
 | DebugMessages | bool | 否 | false | 输出调试消息 |
+| DebugRequestParams | bool | 否 | false | 输出发送前请求参数（含空值字段，敏感信息脱敏） |
+| Thinking | *ThinkingConfig | 否 | nil | Kimi 模型深度思考配置，非 Kimi 模型会忽略 |
 
-### 6.2 CreateAgent 参数
+### 6.2 非基本类型结构与用法
+
+#### 6.3.1 ThinkingConfig
+
+用于控制 Kimi 系列模型的 thinking 行为。
+
+```go
+type ThinkingConfig struct {
+	Type string `json:"type"` // enabled 或 disabled
+}
+```
+
+示例：
+
+```go
+thinking := &llm.ThinkingConfig{Type: "disabled"}
+// 开启时改为 enabled
+```
+
+#### 6.3.2 ToolRegistry
+
+用于管理工具定义与执行器，建议通过构造函数创建。
+
+```go
+registry := llm.NewToolRegistry()
+```
+
+常用注册方式：
+
+```go
+err := registry.RegisterFromHandler("get_current_time", "获取当前时间", func(_ struct{}) (string, error) {
+	return time.Now().Format("2006-01-02 15:04:05"), nil
+})
+```
+
+#### 6.3.3 time.Duration
+
+用于设置请求超时，推荐以秒为单位构造。
+
+```go
+requestTimeout := 90 * time.Second
+```
+
+### 6.3 CreateAgent 参数
 
 `CreateAgent(opts llm.AgentOptions)`
 
@@ -593,6 +582,8 @@ func registerByStructuredTool() (*llm.ToolRegistry, error) {
 | Seed | *int | 否 | nil | 随机种子 |
 | RequestTimeout | *time.Duration | 否 | 90s | 单轮请求超时，必须大于 0 |
 | DebugMessages | bool | 否 | false | 输出调试消息 |
+| DebugRequestParams | bool | 否 | false | 输出发送前请求参数（含空值字段，敏感信息脱敏） |
+| Thinking | *ThinkingConfig | 否 | nil | Kimi 模型深度思考配置，非 Kimi 模型会忽略 |
 
 ## 7. 返回格式
 
